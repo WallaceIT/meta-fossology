@@ -44,7 +44,7 @@ python () {
         bb.fatal("Invalid report format %s selected" % (format_selected))
 }
 
-def excluded_package(d, pn):
+def excluded_package(d):
     pn = d.getVar('PN')
     if bb.data.inherits_class('nopackages', d) or \
        bb.data.inherits_class('packagegroup', d) or \
@@ -63,14 +63,12 @@ def excluded_package(d, pn):
     return False
 
 python () {
-    pn = d.getVar('PN')
-    if excluded_package(d, pn):
+    if excluded_package(d):
         bb.debug(1, 'fossology: Excluding from analysis')
         return
 
     bb.build.addtask('do_fossology_create_tarball', 'do_configure', 'do_patch', d)
     bb.build.addtask('do_fossology_upload_and_unpack', None, 'do_fossology_create_tarball', d)
-    d.appendVarFlag('do_fossology_upload_and_unpack', 'depends', ' %s:do_fossology_create_tarball' % pn)
     bb.build.addtask('do_fossology_analyze', None, 'do_fossology_upload_and_unpack', d)
     bb.build.addtask('do_fossology_get_report', None, 'do_fossology_analyze', d)
     bb.build.addtask('do_fossology_deploy_report', 'do_build', 'do_fossology_get_report', d)
