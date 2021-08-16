@@ -108,6 +108,19 @@ class FossologyServer:
             raise FossologyError(code, results.get("message", ""))
         return results["version"]
 
+    def get_folder_id(self, name: str) -> Optional[int]:
+        """Get ID for folder with given name"""
+        (code, results, _) = self._api_get('/folders', headers=headers)
+        if code != 200:
+            logger.error("Failed to get folder list")
+            raise FossologyError(code, results.get("message", ""))
+        for folder in filter(lambda f: f["name"] == name, results):
+            folder_id = int(folder["id"])
+            logger.debug(1, "Found folder %s with ID = %d" % (name, folder_id))
+            return folder_id
+        else:
+            return None
+
     def get_upload_id(self, filename: str, folder_id: int) -> Optional[int]:
         """Get upload ID for given filename inside given folder"""
         headers = {
@@ -117,10 +130,10 @@ class FossologyServer:
         if code != 200:
             logger.error("Failed to get upload list")
             raise FossologyError(code, results.get("message", ""))
-
         for upload in filter(lambda u: u["uploadname"] == filename, results):
-            logger.info("Found %s in fossology server, with ID %d" % (filename, int(upload["id"])))
-            return int(upload["id"])
+            upload_id = int(upload["id"])
+            logger.debug(1, "Found upload %s with ID = %d" % (filename, upload_id))
+            return upload_id
         else:
             return None
 

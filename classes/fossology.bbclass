@@ -11,7 +11,7 @@ FOSSOLOGY_TOKEN ??= ""
 FOSSOLOGY_ANALYSIS ?= "${AVAILABLE_ANALYSIS}"
 FOSSOLOGY_DECIDER ?= "${AVAILABLE_DECIDER}"
 FOSSOLOGY_REPORT_FORMAT ??= "spdx2tv"
-FOSSOLOGY_FOLDER_ID ??= "1"
+FOSSOLOGY_FOLDER ??= "1"
 
 FOSSOLOGY_EXCLUDE_PACKAGES ?= "binutils-cross linux-libc-headers libtool-cross gcc-cross libgcc-initial glibc libgcc gcc gcc-runtime glibc-locale shadow-sysroot"
 
@@ -79,7 +79,16 @@ python () {
 }
 
 def get_upload_filename(d):
-    return '%s.tar.gz' % d.getVar('PF')
+    return '%s.tar.gz' % (d.getVar('PF'))
+
+def get_report_filename(d, format):
+    return '%s.%s' % (d.getVar('PF'), format)
+
+def get_folder_id(server, name):
+    if name.isdecimal():
+        return int(name)
+    else:
+        return server.get_folder_id(name)
 
 python do_fossology_create_tarball() {
     import tarfile
@@ -101,7 +110,7 @@ python do_fossology_upload_and_unpack() {
     from fossology import FossologyServer, FossologyError, FossologyRetryAfter
 
     fossology_workdir = d.getVar('FOSSOLOGY_WORKDIR')
-    folder_id = int(d.getVar('FOSSOLOGY_FOLDER_ID'))
+    fossology_folder = d.getVar('FOSSOLOGY_FOLDER')
 
     filename = get_upload_filename(d)
     filepath = os.path.join(fossology_workdir, filename)
@@ -109,6 +118,11 @@ python do_fossology_upload_and_unpack() {
     server_url = d.getVar('FOSSOLOGY_SERVER', True)
     token = d.getVar('FOSSOLOGY_TOKEN', True)
     server = FossologyServer(server_url, token)
+
+    folder_id = get_folder_id(server, fossology_folder)
+    if folder_id is None:
+        bb.fatal('Cannot find folder "%s"' % (fossology_folder))
+        return
 
     upload_id = server.get_upload_id(filename, folder_id)
     if upload_id is not None:
@@ -144,15 +158,19 @@ python do_fossology_upload_and_unpack() {
 python do_fossology_delete() {
     from fossology import FossologyServer, FossologyError, FossologyRetryAfter
 
-    folder_id = int(d.getVar('FOSSOLOGY_FOLDER_ID'))
+    fossology_folder = d.getVar('FOSSOLOGY_FOLDER')
     filename = get_upload_filename(d)
 
     server_url = d.getVar('FOSSOLOGY_SERVER', True)
     token = d.getVar('FOSSOLOGY_TOKEN', True)
-
     server = FossologyServer(server_url, token)
 
-    upload_id = server.get_upload_id(filename, int(folder_id))
+    folder_id = get_folder_id(server, fossology_folder)
+    if folder_id is None:
+        bb.fatal('Cannot find folder "%s"' % (fossology_folder))
+        return
+
+    upload_id = server.get_upload_id(filename, folder_id)
     if upload_id is None:
         bb.warn('Upload %s not found on fossology server' % filename)
         return
@@ -168,12 +186,17 @@ python do_fossology_delete() {
 python do_fossology_analyze() {
     from fossology import FossologyServer, FossologyError, FossologyRetryAfter, FossologyJobFailure
 
-    folder_id = int(d.getVar('FOSSOLOGY_FOLDER_ID'))
+    fossology_folder = d.getVar('FOSSOLOGY_FOLDER')
     filename = get_upload_filename(d)
 
     server_url = d.getVar('FOSSOLOGY_SERVER', True)
     token = d.getVar('FOSSOLOGY_TOKEN', True)
     server = FossologyServer(server_url, token)
+
+    folder_id = get_folder_id(server, fossology_folder)
+    if folder_id is None:
+        bb.fatal('Cannot find folder "%s"' % (fossology_folder))
+        return
 
     analysis = d.getVar('FOSSOLOGY_ANALYSIS').split()
     decider = d.getVar('FOSSOLOGY_DECIDER').split()
@@ -227,16 +250,21 @@ python do_fossology_get_report() {
     from fossology import FossologyServer, FossologyError, FossologyRetryAfter
     import os
 
-    pf = d.getVar('PF')
     fossology_reportdir = d.getVar('FOSSOLOGY_REPORTDIR')
-    folder_id = int(d.getVar('FOSSOLOGY_FOLDER_ID'))
-    filename = get_upload_filename(d)
-
+    fossology_folder = d.getVar('FOSSOLOGY_FOLDER')
     report_format = d.getVar('FOSSOLOGY_REPORT_FORMAT')
+
+    filename = get_upload_filename(d)
+    reportname = get_report_filename(d, report_format)
 
     server_url = d.getVar('FOSSOLOGY_SERVER', True)
     token = d.getVar('FOSSOLOGY_TOKEN', True)
     server = FossologyServer(server_url, token)
+
+    folder_id = get_folder_id(server, fossology_folder)
+    if folder_id is None:
+        bb.fatal('Cannot find folder "%s"' % (fossology_folder))
+        return
 
     upload_id = server.get_upload_id(filename, folder_id)
     if upload_id is None:
@@ -262,7 +290,7 @@ python do_fossology_get_report() {
             bb.fatal('Cannot get %s report: %s' % (report_format, e.message))
             return
         else:
-            reportpath = os.path.join(fossology_reportdir, '%s.%s' % (pf, report_format))
+            reportpath = os.path.join(fossology_reportdir, reportname)
             with open(reportpath, 'wb') as reportfile:
                 reportfile.write(reportdata)
             bb.note("%s report saved to %s" % (report_format, reportpath))

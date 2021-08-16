@@ -34,6 +34,18 @@ FOSSOLOGY_EXCLUDE_CANADIAN = "1"
 A selection of target packages, contained in _FOSSOLOGY_EXCLUDE_PACKAGES_, is
 also excluded.
 
+### Select upload folder
+
+Upload folder can be selected through the _FOSSOLOGY_FOLDER_ variable, either
+using the folder name or its numeric ID.
+
+e.g.
+```
+FOSSOLOGY_FOLDER = "My upload folder"
+```
+
+By default the root folder, having ID=1, is used.
+
 ### Customize analysis agents
 
 Analysis agents can be customized using the _FOSSOLOGY_ANALYSIS_ variable.
