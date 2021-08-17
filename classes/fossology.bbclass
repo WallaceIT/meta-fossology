@@ -17,7 +17,6 @@ FOSSOLOGY_EXCLUDE_PACKAGES ?= "binutils-cross linux-libc-headers libtool-cross g
 
 FOSSOLOGY_EXCLUDE_NATIVE ??= "1"
 FOSSOLOGY_EXCLUDE_SDK ??= "1"
-FOSSOLOGY_EXCLUDE_CANADIAN??= "1"
 
 DEPLOY_DIR_FOSSOLOGY ?= "${DEPLOY_DIR}/fossology"
 FOSSOLOGY_WORKDIR = "${WORKDIR}/fossology-work/"
@@ -44,36 +43,39 @@ python () {
         bb.fatal("Invalid report format %s selected" % (format_selected))
 }
 
-def excluded_package(d):
+python () {
     pn = d.getVar('PN')
+    assume_provided = (d.getVar("ASSUME_PROVIDED") or "").split()
+    if pn in assume_provided:
+        for p in d.getVar("PROVIDES").split():
+            if p != pn:
+                pn = p
+                break
+
+    # Do not include recipes which don't produce packages
     if bb.data.inherits_class('nopackages', d) or \
        bb.data.inherits_class('packagegroup', d) or \
        bb.data.inherits_class('image', d):
-        return True
-    if pn.endswith('-native') and d.getVar("FOSSOLOGY_EXCLUDE_NATIVE") == "1":
-        return True
-    if pn.startswith('nativesdk-') and d.getVar("FOSSOLOGY_EXCLUDE_SDK") == "1":
-        return True
-    if pn.endswith('-crosssdk') and d.getVar("FOSSOLOGY_EXCLUDE_SDK") == "1":
-        return True
-    if '-canadian' in pn and d.getVar("FOSSOLOGY_EXCLUDE_CANADIAN") == "1":
-        return True
-    if pn in d.getVar("FOSSOLOGY_EXCLUDE_PACKAGES").split():
-        return True
-    return False
-
-python () {
-    if excluded_package(d):
-        bb.debug(1, 'fossology: Excluding from analysis')
         return
 
-    bb.build.addtask('do_fossology_create_tarball', 'do_configure', 'do_patch', d)
-    bb.build.addtask('do_fossology_upload_and_unpack', None, 'do_fossology_create_tarball', d)
-    bb.build.addtask('do_fossology_analyze', None, 'do_fossology_upload_and_unpack', d)
-    bb.build.addtask('do_fossology_get_report', None, 'do_fossology_analyze', d)
-    bb.build.addtask('do_fossology_deploy_report', 'do_build', 'do_fossology_get_report', d)
+    # Analyze native recipes only if not excluded
+    if pn.endswith('-native') and d.getVar("FOSSOLOGY_EXCLUDE_NATIVE") == "1":
+        return
 
-    bb.build.addtask('do_fossology_delete', None, None, d)
+    # Analyze SDK-related recipes only if not excluded
+    if pn.startswith('nativesdk-') and d.getVar("FOSSOLOGY_EXCLUDE_SDK") == "1":
+        return
+    if pn.endswith('-crosssdk') and d.getVar("FOSSOLOGY_EXCLUDE_SDK") == "1":
+        return
+    if pn.endswith('-cross-canadian') and d.getVar("FOSSOLOGY_EXCLUDE_SDK") == "1":
+        return
+
+    # Exclude packages contained in FOSSOLOGY_EXCLUDE_PACKAGES
+    if pn in d.getVar("FOSSOLOGY_EXCLUDE_PACKAGES").split():
+        bb.debug(1, 'fossology: %s excluded from analysis' % (pn))
+        return
+
+    d.appendVarFlag('do_fossology_deploy_report', 'depends', ' %s:do_fossology_get_report' % pn)
 }
 
 def get_upload_filename(d):
@@ -92,6 +94,13 @@ python do_fossology_create_tarball() {
     import tarfile
     import os
 
+    def exclude_paths(tarinfo):
+        if tarinfo.isdir() and tarinfo.name.endswith('.git'):
+            return None
+        elif tarinfo.issym() and tarinfo.name in ['oe-workdir', 'oe-logs']:
+            return None
+        return tarinfo
+
     fossology_workdir = d.getVar('FOSSOLOGY_WORKDIR')
     srcdir = os.path.realpath(d.getVar('S'))
     filename = get_upload_filename(d)
@@ -99,12 +108,12 @@ python do_fossology_create_tarball() {
     bb.note('Archiving the sources to be analyzed as %s...' % (filename))
 
     tar = tarfile.open(os.path.join(fossology_workdir, filename), 'w:gz')
-    tar.add(srcdir, arcname=os.path.basename(srcdir))
+    tar.add(srcdir, arcname=os.path.basename(srcdir), filter=exclude_paths)
     tar.close()
 }
 do_fossology_create_tarball[cleandirs] = "${FOSSOLOGY_WORKDIR}"
 
-python do_fossology_upload_and_unpack() {
+python do_fossology_upload() {
     from fossology import FossologyServer, FossologyError, FossologyRetryAfter
 
     fossology_workdir = d.getVar('FOSSOLOGY_WORKDIR')
@@ -296,13 +305,25 @@ python do_fossology_get_report() {
 }
 do_fossology_get_report[cleandirs] = "${FOSSOLOGY_REPORTDIR}"
 
+addtask do_fossology_create_tarball after do_patch
+addtask do_fossology_upload after do_fossology_create_tarball
+addtask do_fossology_analyze after do_fossology_upload
+addtask do_fossology_get_report after do_fossology_analyze
+addtask do_fossology_delete
+addtask do_fossology_deploy_report
+do_build[recrdeptask] += "do_fossology_deploy_report"
+do_rootfs[recrdeptask] += "do_fossology_deploy_report"
+do_populate_sdk[recrdeptask] += "do_fossology_deploy_report"
+
 SSTATETASKS += "do_fossology_deploy_report"
-do_fossology_deploy_report () {
+do_fossology_deploy_report() {
     echo "Deploying fossology report from ${FOSSOLOGY_REPORTDIR} to ${DEPLOY_DIR_FOSSOLOGY}."
 }
-python do_fossology_deploy_report_setscene () {
+python do_fossology_deploy_report_setscene() {
     sstate_setscene(d)
 }
+addtask do_fossology_deploy_report_setscene
+
 do_fossology_deploy_report[dirs] = "${FOSSOLOGY_REPORTDIR}"
 do_fossology_deploy_report[sstate-inputdirs] = "${FOSSOLOGY_REPORTDIR}"
 do_fossology_deploy_report[sstate-outputdirs] = "${DEPLOY_DIR_FOSSOLOGY}"

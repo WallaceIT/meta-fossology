@@ -22,13 +22,15 @@ through Fossolgy web UI.
 
 ### Exclude packages from scan
 
-By default, _-native_, _nativesdk-_ and _-canadian_ packages are excluded from
-the scan; to customize this behaviour, following variables are available:
+By default, _-native_, _nativesdk-_ and _-cross-canadian_ packages are excluded
+from the scan; to customize this behaviour, following variables are available:
 
 ```
+# Exclude *-native packages
 FOSSOLOGY_EXCLUDE_NATIVE = "1"
+
+# Exclude nativesdk-* and *-cross-canadian packages
 FOSSOLOGY_EXCLUDE_SDK = "1"
-FOSSOLOGY_EXCLUDE_CANADIAN = "1"
 ```
 
 A selection of target packages, contained in _FOSSOLOGY_EXCLUDE_PACKAGES_, is
