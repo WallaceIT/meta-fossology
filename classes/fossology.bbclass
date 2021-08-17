@@ -220,8 +220,8 @@ python do_fossology_analyze() {
         except FossologyError as e:
             bb.fatal('Failed to retrieve job status: %s' % (e.message))
             return
-        except FossologyJobFailure as e:
-            bb.fatal('Fossology job %d failed' % (e.message))
+        except FossologyJobFailure as f:
+            bb.fatal('Fossology job %d failed' % (f.job))
             return
         else:
             time.sleep(5)
