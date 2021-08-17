@@ -160,7 +160,7 @@ class FossologyServer:
     def upload_delete(self, upload_id: int) -> bool:
         """Delete upload file(s)"""
         (code, headers, results) = self._api_delete('/uploads/%d' % (upload_id))
-        return (code != 202)
+        return (code == 202)
 
     def upload_get_summary(self, upload_id: int) -> dict:
         """Get summary for given upload ID"""
