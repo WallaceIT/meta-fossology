@@ -72,8 +72,7 @@ class FossologyServer:
             logger.error('Failed to decode JSON response')
             results = None
         logger.debug('GET %s -> %d' % (api, r.status_code))
-        retry_after = int(r.headers.get("Retry-After", 0))
-        return (r.status_code, results, retry_after)
+        return (r.status_code, r.headers, results)
 
     def _api_post(self, api: str, headers: str=None, data=None, json: dict=None) -> (int, Union[list,dict,None], int):
         all_headers = {'Authorization': 'Bearer %s' % self.token}
@@ -86,8 +85,7 @@ class FossologyServer:
             logger.error('Failed to decode JSON response')
             results = None
         logger.debug('POST %s -> %d' % (api, r.status_code))
-        retry_after = int(r.headers.get("Retry-After", 0))
-        return (r.status_code, results, retry_after)
+        return (r.status_code, r.headers, results)
 
     def _api_delete(self, api: str, headers: str=None) -> (int, dict):
         all_headers = {'Authorization': 'Bearer %s' % self.token}
@@ -100,17 +98,17 @@ class FossologyServer:
             logger.error('Failed to decode JSON response')
             results = None
         logger.debug('DELETE %s -> %d' % (api, r.status_code))
-        return (r.status_code, results)
+        return (r.status_code, r.headers, results)
 
     def get_api_version(self):
-        (code, results, _) = self._api_get('/version')
+        (code, headers, results) = self._api_get('/version')
         if code != 200:
             raise FossologyError(code, results.get("message", ""))
         return results["version"]
 
     def get_folder_id(self, name: str) -> Optional[int]:
         """Get ID for folder with given name"""
-        (code, results, _) = self._api_get('/folders', headers=headers)
+        (code, headers, results) = self._api_get('/folders')
         if code != 200:
             logger.error("Failed to get folder list")
             raise FossologyError(code, results.get("message", ""))
@@ -123,32 +121,37 @@ class FossologyServer:
 
     def get_upload_id(self, filename: str, folder_id: int) -> Optional[int]:
         """Get upload ID for given filename inside given folder"""
-        headers = {
-            'folderId' : str(folder_id)
-        }
-        (code, results, _) = self._api_get('/uploads', headers=headers)
-        if code != 200:
-            logger.error("Failed to get upload list")
-            raise FossologyError(code, results.get("message", ""))
-        for upload in filter(lambda u: u["uploadname"] == filename, results):
-            upload_id = int(upload["id"])
-            logger.debug(1, "Found upload %s with ID = %d" % (filename, upload_id))
-            return upload_id
-        else:
-            return None
+        page_num = 1
+        while True:
+            rq_headers = {
+                'folderId' : str(folder_id),
+                'page' : str(page_num),
+            }
+            (code, headers, results) = self._api_get('/uploads', headers=rq_headers)
+            if code != 200:
+                logger.error("Failed to get upload list")
+                raise FossologyError(code, results.get("message", ""))
+            for upload in filter(lambda u: u["uploadname"] == filename, results):
+                upload_id = int(upload["id"])
+                logger.debug(1, "Found upload %s with ID = %d" % (filename, upload_id))
+                return upload_id
+            if page_num < int(headers.get('X-Total-Pages', 1)):
+                page_num += 1
+            else:
+                return None
 
     def upload(self, filepath: str, filename: str, folder_id: str, description: str="Uploaded by FossologyServer class") -> int:
         """Upload file"""
         from requests_toolbelt.multipart.encoder import MultipartEncoder
         with open(filepath, 'rb') as file:
             m = MultipartEncoder(fields={'fileInput': (filename, file, 'application/octet-stream')})
-            headers = {
+            rq_headers = {
                 'folderId' : str(folder_id),
                 'uploadDescription' : description,
                 'public' : 'public',
                 'Content-Type': m.content_type
             }
-            (code, results, _) = self._api_post('/uploads', headers=headers, data=m)
+            (code, headers, results) = self._api_post('/uploads', headers=rq_headers, data=m)
             if code != 201:
                 logger.warning('Upload failed with message: %s' % results.get("message", "None"))
                 raise FossologyError(code, results.get("message", ""))
@@ -156,13 +159,14 @@ class FossologyServer:
 
     def upload_delete(self, upload_id: int) -> bool:
         """Delete upload file(s)"""
-        (code, results, _) = self._api_delete('/uploads/%d' % (upload_id))
+        (code, headers, results) = self._api_delete('/uploads/%d' % (upload_id))
         return (code != 202)
 
     def upload_get_summary(self, upload_id: int) -> dict:
         """Get summary for given upload ID"""
-        (code, results, retry_after) = self._api_get('/uploads/%d/summary' % (upload_id))
+        (code, headers, results) = self._api_get('/uploads/%d/summary' % (upload_id))
         if code == 503:
+            retry_after = int(headers.get("Retry-After", 3))
             logger.info('Upload summary not yet available')
             raise FossologyRetryAfter(retry_after)
         elif code != 200:
@@ -179,8 +183,9 @@ class FossologyServer:
             "agent" : ','.join(agents),
             "containers" : get_containers
         }
-        (code, results, retry_after) = self._api_get('/uploads/%d/licenses' % upload_id, params=params)
+        (code, headers, results) = self._api_get('/uploads/%d/licenses' % upload_id, params=params)
         if code == 503:
+            retry_after = int(headers.get("Retry-After", 3))
             logger.info('Upload licenses not yet available')
             raise FossologyRetryAfter(retry_after)
         elif code != 200:
@@ -198,7 +203,7 @@ class FossologyServer:
         invalid_decider = [x for x in decider if x not in available_decider]
         if len(invalid_decider) > 0:
             raise FossologyInvalidParameter("Invalid decider for job: %s" % (','.join(invalid_decider)))
-        headers = {
+        rq_headers = {
             'folderId' : str(folder_id),
             'uploadId' : str(upload_id)
         }
@@ -210,14 +215,14 @@ class FossologyServer:
             conf["analysis"].update({ a : True })
         for d in decider:
             conf["decider"].update({ d : True })
-        (code, results, _) = self._api_post('/jobs', headers=headers, json=conf)
+        (code, headers, results) = self._api_post('/jobs', headers=rq_headers, json=conf)
         if code != 201:
             raise FossologyError(code, results.get("message", "None"))
         return int(results["message"])
 
     def job_completed(self, job_id: int) -> bool:
         """Check if job with given ID has been completed"""
-        (code, results, retry_after) = self._api_get('/jobs/%d' % (job_id))
+        (code, headers, results) = self._api_get('/jobs/%d' % (job_id))
         if code != 200:
             raise FossologyError(results.get("message", ""))
         logger.debug("Job %d status: %s" % (job_id, results["status"]))
@@ -230,11 +235,11 @@ class FossologyServer:
         available_formats = [ "dep5", "spdx2", "spdx2tv", "readmeoss", "unifiedreport" ]
         if report_format not in available_formats:
             raise FossologyInvalidParameter("Invalid report format: %s" % (report_format))
-        headers = {
+        rq_headers = {
             'uploadId' : str(upload_id),
             'reportFormat' : report_format
         }
-        (code, results, _) = self._api_get('/report', headers=headers)
+        (code, headers, results) = self._api_get('/report', headers=rq_headers)
         if code != 201:
             raise FossologyError(code, results.get("message", ""))
         report_id = int(results["message"].split('/')[-1])
@@ -242,9 +247,10 @@ class FossologyServer:
 
     def download_report(self, report_id: int) -> bytes:
         """Download report having given ID"""
-        (code, results, retry_after) = self._api_get('/report/%d' % (report_id), binary=True)
+        (code, headers, results) = self._api_get('/report/%d' % (report_id), binary=True)
         if code == 503:
             logger.info('Report not yet ready')
+            retry_after = int(headers.get("Retry-After", 3))
             raise FossologyRetryAfter(retry_after)
         elif code != 200:
             raise FossologyError(code, results.get("message", ""))
