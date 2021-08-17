@@ -113,11 +113,16 @@ python do_fossology_create_tarball() {
 }
 do_fossology_create_tarball[cleandirs] = "${FOSSOLOGY_WORKDIR}"
 
-python do_fossology_upload() {
-    from fossology import FossologyServer, FossologyError, FossologyRetryAfter
+python do_fossology_upload_analyze() {
+    from fossology import FossologyServer, FossologyError, FossologyInvalidParameter, \
+                          FossologyRetryAfter, FossologyJobFailure
+    import os
 
     fossology_workdir = d.getVar('FOSSOLOGY_WORKDIR')
     fossology_folder = d.getVar('FOSSOLOGY_FOLDER')
+
+    fossology_analysis = d.getVar('FOSSOLOGY_ANALYSIS').split()
+    fossology_decider = d.getVar('FOSSOLOGY_DECIDER').split()
 
     filename = get_upload_filename(d)
     filepath = os.path.join(fossology_workdir, filename)
@@ -129,36 +134,82 @@ python do_fossology_upload() {
     folder_id = get_folder_id(server, fossology_folder)
     if folder_id is None:
         bb.fatal('Cannot find folder "%s"' % (fossology_folder))
-        return
+    else:
+        bb.debug(1, 'Folder "%s" has ID %d' % (fossology_folder, folder_id))
 
     upload_id = server.get_upload_id(filename, folder_id)
     if upload_id is not None:
-        bb.note('Sources already uploaded to fossology server')
-        return
-
-    wait_time = 5
-    for i in range(100):
-        upload_id = server.upload(filepath, filename, folder_id)
-        if upload_id is not None:
-            bb.note('Uploading %s to fossology server' % filename)
-            break
-        else:
-            bb.warn('Upload failed, will retry in %ds' % (wait_time))
-            time.sleep(wait_time)
-            wait_time = wait_time * 2
+        bb.note('Sources already uploaded to fossology server (ID = %d)' % (upload_id))
     else:
-        bb.fatal('Failed to upload %s to fossology server' % filename)
+        wait_time = 5
+        for i in range(10):
+            bb.debug(1, 'Upload %s, trial %d' % (filename, i))
+            upload_id = server.upload(filepath, filename, folder_id)
+            if upload_id is not None:
+                bb.note('Uploading %s to fossology server, with ID = %u' % (filename, upload_id))
+                break
+            else:
+                bb.warn('Upload failed, will retry in %ds' % (wait_time))
+                time.sleep(wait_time)
+                wait_time = wait_time * 2
+        else:
+            bb.fatal('Failed to upload %s to fossology server' % filename)
 
+    bb.debug(1, 'Wait for upload summary to be ready')
     while True:
         try:
             server.upload_get_summary(upload_id)
         except FossologyRetryAfter as ra:
-            bb.note('Waiting for summary, will retry after %ds' % (ra.time))
+            bb.note('Summary not yet ready, will retry after %ds' % (ra.time))
             time.sleep(ra.time)
         except FossologyError as e:
             bb.fatal('Cannot get upload summary: %s' % (e.message))
         else:
             bb.note('Upload complete')
+            break
+
+    bb.debug(1, 'Schedule analysis job')
+    bb.debug(2, 'Analysis agents: %s' % (fossology_analysis))
+    bb.debug(2, 'Decider agents: %s' % (fossology_decider))
+    try:
+        job_id = server.schedule_job(upload_id, folder_id, fossology_analysis, fossology_decider)
+    except FossologyError as e:
+        bb.fatal('Failed to schedule analysis: %s' % (e.message))
+    except FossologyInvalidParameter as e:
+        bb.fatal('Parameter error: %s' % (e.message))
+    else:
+        bb.note('Scheduled analysis job, with ID = %d' % (job_id))
+
+    bb.debug(1, 'Wait for job to complete')
+    wait_time = 2
+    while True:
+        try:
+            if server.job_completed(job_id):
+                bb.note('Analysis job completed')
+                break
+        except FossologyError as e:
+            bb.fatal('Failed to retrieve job status: %s' % (e.message))
+        except FossologyJobFailure as f:
+            bb.fatal('Fossology job %d failed' % (f.job))
+        else:
+            bb.debug(1, 'Job not yet completed, will retry after %ds' % (wait_time))
+            time.sleep(wait_time)
+            wait_time = max(wait_time * 2, 60)
+
+    bb.debug(1, 'Wait for licenses to be ready')
+    while True:
+        try:
+            agents = [x for x in ["nomos", "monk", "ojo", "reso"] if x in fossology_analysis]
+            server.upload_get_licenses(upload_id, agents)
+        except FossologyRetryAfter as ra:
+            bb.note('Licenses not yet ready, will retry after %ds' % (ra.time))
+            time.sleep(ra.time)
+        except FossologyError as e:
+            bb.fatal('Cannot get upload licenses: %s' % (e.message))
+        except FossologyInvalidParameter as e:
+            bb.fatal('Parameter error: %s' % (e.message))
+        else:
+            bb.note('Analysis complete')
             break
 }
 
@@ -175,7 +226,6 @@ python do_fossology_delete() {
     folder_id = get_folder_id(server, fossology_folder)
     if folder_id is None:
         bb.fatal('Cannot find folder "%s"' % (fossology_folder))
-        return
 
     upload_id = server.get_upload_id(filename, folder_id)
     if upload_id is None:
@@ -188,69 +238,6 @@ python do_fossology_delete() {
         else:
             bb.note("Deleted upload ID %d" % upload_id)
         upload_id = server.get_upload_id(filename, folder_id)
-}
-
-python do_fossology_analyze() {
-    from fossology import FossologyServer, FossologyError, FossologyRetryAfter, FossologyJobFailure
-
-    fossology_folder = d.getVar('FOSSOLOGY_FOLDER')
-    filename = get_upload_filename(d)
-
-    server_url = d.getVar('FOSSOLOGY_SERVER', True)
-    token = d.getVar('FOSSOLOGY_TOKEN', True)
-    server = FossologyServer(server_url, token)
-
-    folder_id = get_folder_id(server, fossology_folder)
-    if folder_id is None:
-        bb.fatal('Cannot find folder "%s"' % (fossology_folder))
-        return
-
-    analysis = d.getVar('FOSSOLOGY_ANALYSIS').split()
-    decider = d.getVar('FOSSOLOGY_DECIDER').split()
-
-    upload_id = server.get_upload_id(filename, folder_id)
-    if upload_id is None:
-        bb.fatal('Upload %s not found on fossology server' % filename)
-        return
-
-    try:
-        job_id = server.schedule_job(upload_id, folder_id, analysis, decider)
-    except FossologyError as e:
-        bb.fatal('Failed to schedule analysis: %s' % (e.message))
-        return
-    except FossologyInvalidParameter as e:
-        bb.fatal('Parameter error: %s' % (e.message))
-        return
-
-    while True:
-        try:
-            if server.job_completed(job_id):
-                break
-        except FossologyError as e:
-            bb.fatal('Failed to retrieve job status: %s' % (e.message))
-            return
-        except FossologyJobFailure as f:
-            bb.fatal('Fossology job %d failed' % (f.job))
-            return
-        else:
-            time.sleep(5)
-
-    while True:
-        try:
-            agents = [x for x in ["nomos", "monk", "ojo", "reso"] if x in analysis]
-            server.upload_get_licenses(upload_id, agents)
-        except FossologyRetryAfter as ra:
-            bb.note('Waiting for licenses, will retry after %ds' % (ra.time))
-            time.sleep(ra.time)
-        except FossologyError as e:
-            bb.fatal('Cannot get upload licenses: %s' % (e.message))
-            return
-        except FossologyInvalidParameter as e:
-            bb.fatal('Parameter error: %s' % (e.message))
-            return
-        else:
-            bb.note('Analysis complete')
-            break
 }
 
 python do_fossology_get_report() {
@@ -271,21 +258,17 @@ python do_fossology_get_report() {
     folder_id = get_folder_id(server, fossology_folder)
     if folder_id is None:
         bb.fatal('Cannot find folder "%s"' % (fossology_folder))
-        return
 
     upload_id = server.get_upload_id(filename, folder_id)
     if upload_id is None:
         bb.fatal('Upload %s not found on fossology server' % filename)
-        return
 
     try:
         report_id = server.report_trigger_generation(upload_id, report_format)
     except FossologyError as e:
         bb.fatal('Failed to trigger report generation: %s' % (e.message))
-        return
     except FossologyInvalidParameter as e:
-            bb.fatal('Parameter error: %s' % (e.message))
-            return
+        bb.fatal('Parameter error: %s' % (e.message))
 
     while True:
         try:
@@ -295,7 +278,6 @@ python do_fossology_get_report() {
             time.sleep(ra.time)
         except FossologyError as e:
             bb.fatal('Cannot get %s report: %s' % (report_format, e.message))
-            return
         else:
             reportpath = os.path.join(fossology_reportdir, reportname)
             with open(reportpath, 'wb') as reportfile:
@@ -306,9 +288,8 @@ python do_fossology_get_report() {
 do_fossology_get_report[cleandirs] = "${FOSSOLOGY_REPORTDIR}"
 
 addtask do_fossology_create_tarball after do_patch
-addtask do_fossology_upload after do_fossology_create_tarball
-addtask do_fossology_analyze after do_fossology_upload
-addtask do_fossology_get_report after do_fossology_analyze
+addtask do_fossology_upload_analyze after do_fossology_create_tarball
+addtask do_fossology_get_report after do_fossology_upload_analyze
 addtask do_fossology_delete
 addtask do_fossology_deploy_report
 do_build[recrdeptask] += "do_fossology_deploy_report"
