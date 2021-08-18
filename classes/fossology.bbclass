@@ -75,6 +75,13 @@ python () {
         bb.debug(1, 'fossology: %s excluded from analysis' % (pn))
         return
 
+    # FIXME: exclude recipes for which S is equal to WORKDIR
+    srcdir = d.getVar('S')
+    workdir = d.getVar('WORKDIR')
+    if srcdir == workdir:
+        bb.debug(1, 'fossology: excluding %s from analysis since S == WORKDIR' % (pn))
+        return
+
     d.appendVarFlag('do_fossology_deploy_report', 'depends', ' %s:do_fossology_get_report' % pn)
 }
 
