@@ -27,23 +27,6 @@ AVAILABLE_DECIDER = "nomos_monk bulk_reused new_scanner ojo_decider"
 AVAILABLE_FORMATS = "dep5 spdx2 spdx2tv readmeoss unifiedreport"
 
 python () {
-    analysis_available = d.getVar('AVAILABLE_ANALYSIS').split()
-    analysis_enabled = d.getVar('FOSSOLOGY_ANALYSIS').split()
-    for invalid in filter(lambda x: x not in analysis_available, analysis_enabled):
-        bb.fatal("Invalid element %s found in FOSSOLOGY_ANALYSIS" % invalid)
-
-    decider_available = d.getVar('AVAILABLE_DECIDER').split()
-    decider_enabled = d.getVar('FOSSOLOGY_DECIDER').split()
-    for invalid in filter(lambda x: x not in decider_available, decider_enabled):
-        bb.fatal("Invalid element %s found in FOSSOLOGY_DECIDER" % invalid)
-
-    formats_available = d.getVar('AVAILABLE_FORMATS').split()
-    format_selected = d.getVar('FOSSOLOGY_REPORT_FORMAT')
-    if format_selected not in formats_available:
-        bb.fatal("Invalid report format %s selected" % (format_selected))
-}
-
-python () {
     pn = d.getVar('PN')
     assume_provided = (d.getVar("ASSUME_PROVIDED") or "").split()
     if pn in assume_provided:
@@ -74,6 +57,22 @@ python () {
     if pn in d.getVar("FOSSOLOGY_EXCLUDE_PACKAGES").split():
         bb.debug(1, 'fossology: %s excluded from analysis' % (pn))
         return
+
+    # Check configuration variables
+    analysis_available = d.getVar('AVAILABLE_ANALYSIS').split()
+    analysis_enabled = d.getVar('FOSSOLOGY_ANALYSIS').split()
+    for invalid in filter(lambda x: x not in analysis_available, analysis_enabled):
+        bb.fatal("Invalid element %s found in FOSSOLOGY_ANALYSIS" % invalid)
+
+    decider_available = d.getVar('AVAILABLE_DECIDER').split()
+    decider_enabled = d.getVar('FOSSOLOGY_DECIDER').split()
+    for invalid in filter(lambda x: x not in decider_available, decider_enabled):
+        bb.fatal("Invalid element %s found in FOSSOLOGY_DECIDER" % invalid)
+
+    formats_available = d.getVar('AVAILABLE_FORMATS').split()
+    format_selected = d.getVar('FOSSOLOGY_REPORT_FORMAT')
+    if format_selected not in formats_available:
+        bb.fatal("Invalid report format %s selected" % (format_selected))
 
     d.appendVarFlag('do_fossology_deploy_report', 'depends', ' %s:do_fossology_get_report' % pn)
 }
@@ -145,6 +144,8 @@ python do_fossology_create_tarball() {
         return tarinfo
 
     bb.note('Archiving the patched sources to be analyzed...')
+
+    # TAR.GZ is produced in two steps in order to force its mtime
     with gzip.GzipFile(filepath, 'wb', mtime=0) as gz:
         with tarfile.open(fileobj=gz, mode='w:') as tar:
             tar.add(d.getVar('S'), arcname=d.getVar('PF'), filter=exclude_paths_and_reset_metadata)
@@ -157,16 +158,16 @@ python do_fossology_upload_analyze() {
     import os
 
     fossology_workdir = d.getVar('FOSSOLOGY_WORKDIR')
-    fossology_folder = d.getVar('FOSSOLOGY_FOLDER')
 
     fossology_analysis = d.getVar('FOSSOLOGY_ANALYSIS').split()
     fossology_decider = d.getVar('FOSSOLOGY_DECIDER').split()
+    fossology_folder = d.getVar('FOSSOLOGY_FOLDER')
 
     filename = get_upload_filename(d)
     filepath = os.path.join(fossology_workdir, filename)
 
-    server_url = d.getVar('FOSSOLOGY_SERVER', True)
-    token = d.getVar('FOSSOLOGY_TOKEN', True)
+    server_url = d.getVar('FOSSOLOGY_SERVER')
+    token = d.getVar('FOSSOLOGY_TOKEN')
     server = FossologyServer(server_url, token)
 
     folder_id = get_folder_id(server, fossology_folder)
@@ -175,6 +176,7 @@ python do_fossology_upload_analyze() {
     else:
         bb.debug(1, 'Folder "%s" has ID %d' % (fossology_folder, folder_id))
 
+    # Check if upload already esists on server
     upload_id = server.get_upload_id(filename, folder_id)
     if upload_id is not None:
         bb.note('File %s already present on server (ID = %d)' % (filename, upload_id))
@@ -201,6 +203,7 @@ python do_fossology_upload_analyze() {
                 time.sleep(5)
             upload_id = None
 
+    # If upload was not found, or re-upload forced, do upload the archived sources
     if upload_id is None:
         wait_time = 5
         for i in range(10):
@@ -216,6 +219,7 @@ python do_fossology_upload_analyze() {
         else:
             bb.fatal('Failed to upload %s to fossology server' % filename)
 
+    # Wait for upload summary to be ready, i.e. for ununpack and adj2nest jobs to complete
     bb.debug(1, 'Wait for upload summary to be ready')
     while True:
         try:
@@ -229,6 +233,7 @@ python do_fossology_upload_analyze() {
             bb.note('Upload complete')
             break
 
+    # Schedule selected analysis jobs
     bb.debug(1, 'Schedule analysis job')
     bb.debug(2, 'Analysis agents: %s' % (fossology_analysis))
     bb.debug(2, 'Decider agents: %s' % (fossology_decider))
@@ -241,6 +246,8 @@ python do_fossology_upload_analyze() {
     else:
         bb.note('Scheduled analysis job, with ID = %d' % (job_id))
 
+    # Wait for scheduled jobs to complete, using the virtual job ID provided
+    # during scheduling above
     bb.debug(1, 'Wait for job to complete')
     wait_time = 2
     while True:
@@ -257,6 +264,7 @@ python do_fossology_upload_analyze() {
             time.sleep(wait_time)
             wait_time = max(wait_time * 2, 60)
 
+    # Wait for licenses summary to be ready
     bb.debug(1, 'Wait for licenses to be ready')
     while True:
         try:
@@ -280,14 +288,15 @@ python do_fossology_delete() {
     fossology_folder = d.getVar('FOSSOLOGY_FOLDER')
     filename = get_upload_filename(d)
 
-    server_url = d.getVar('FOSSOLOGY_SERVER', True)
-    token = d.getVar('FOSSOLOGY_TOKEN', True)
+    server_url = d.getVar('FOSSOLOGY_SERVER')
+    token = d.getVar('FOSSOLOGY_TOKEN')
     server = FossologyServer(server_url, token)
 
     folder_id = get_folder_id(server, fossology_folder)
     if folder_id is None:
         bb.fatal('Cannot find folder "%s"' % (fossology_folder))
 
+    # Delete all uploads with the same filename
     upload_id = server.get_upload_id(filename, folder_id)
     if upload_id is None:
         bb.warn('Upload %s not found on fossology server' % filename)
@@ -312,8 +321,8 @@ python do_fossology_get_report() {
     filename = get_upload_filename(d)
     reportname = get_report_filename(d, report_format)
 
-    server_url = d.getVar('FOSSOLOGY_SERVER', True)
-    token = d.getVar('FOSSOLOGY_TOKEN', True)
+    server_url = d.getVar('FOSSOLOGY_SERVER')
+    token = d.getVar('FOSSOLOGY_TOKEN')
     server = FossologyServer(server_url, token)
 
     folder_id = get_folder_id(server, fossology_folder)
@@ -324,6 +333,7 @@ python do_fossology_get_report() {
     if upload_id is None:
         bb.fatal('Upload %s not found on fossology server' % filename)
 
+    # Trigger report generation
     try:
         report_id = server.report_trigger_generation(upload_id, report_format)
     except FossologyError as e:
@@ -331,6 +341,7 @@ python do_fossology_get_report() {
     except FossologyInvalidParameter as e:
         bb.fatal('Parameter error: %s' % (e.message))
 
+    # Wait for report to be ready, then download and save it
     while True:
         try:
             reportdata = server.download_report(report_id)
