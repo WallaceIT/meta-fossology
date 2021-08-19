@@ -75,13 +75,6 @@ python () {
         bb.debug(1, 'fossology: %s excluded from analysis' % (pn))
         return
 
-    # FIXME: exclude recipes for which S is equal to WORKDIR
-    srcdir = d.getVar('S')
-    workdir = d.getVar('WORKDIR')
-    if srcdir == workdir:
-        bb.debug(1, 'fossology: excluding %s from analysis since S == WORKDIR' % (pn))
-        return
-
     d.appendVarFlag('do_fossology_deploy_report', 'depends', ' %s:do_fossology_get_report' % pn)
 }
 
@@ -104,18 +97,49 @@ python do_fossology_create_tarball() {
     def exclude_paths(tarinfo):
         if tarinfo.isdir() and tarinfo.name.endswith('.git'):
             return None
+        elif tarinfo.isfile() and tarinfo.name in ['.gitignore', '.gitmodules']:
+            return None
         elif tarinfo.issym() and tarinfo.name in ['oe-workdir', 'oe-logs']:
             return None
         return tarinfo
 
     fossology_workdir = d.getVar('FOSSOLOGY_WORKDIR')
-    srcdir = os.path.realpath(d.getVar('S'))
+    original_sysroot_native = d.getVar('STAGING_DIR_NATIVE')
     filename = get_upload_filename(d)
+    filepath = os.path.join(fossology_workdir, filename)
 
-    bb.note('Archiving the sources to be analyzed as %s...' % (filename))
+    # Sources are unpacked and patched in a dedicated directory, in order not
+    # to have interferences with other tasks
 
-    tar = tarfile.open(os.path.join(fossology_workdir, filename), 'w:gz')
-    tar.add(srcdir, arcname=os.path.basename(srcdir), filter=exclude_paths)
+    bb.note('Extracting and patching sources...')
+
+    def is_work_shared(d):
+        return bb.data.inherits_class('kernel', d)
+
+    if not is_work_shared(d):
+        # Change the WORKDIR to make do_unpack do_patch run in another dir.
+        d.setVar('WORKDIR', os.path.join(fossology_workdir, 'workdir'))
+        # Restore the original path to recipe's native sysroot (it's relative to WORKDIR).
+        d.setVar('STAGING_DIR_NATIVE', original_sysroot_native)
+
+        # The changed 'WORKDIR' also caused 'B' changed, create dir 'B' for the
+        # possibly requiring of the following tasks (such as some recipes's
+        # do_patch required 'B' existed).
+        bb.utils.mkdirhier(d.getVar('B'))
+
+        bb.build.exec_func('do_unpack', d)
+
+    # If required by recipe, convert CRLF to LF
+    if bb.data.inherits_class('dos2unix', d):
+        bb.build.exec_func('do_convert_crlf_to_lf', d)
+
+    # Make sure recipes with shared workdir are patched only once
+    if not (d.getVar('SRC_URI') == '' or is_work_shared(d)):
+        bb.build.exec_func('do_patch', d)
+
+    bb.note('Archiving the patched sources to be analyzed...')
+    tar = tarfile.open(filepath, 'w:gz')
+    tar.add(d.getVar('S'), arcname=d.getVar('PF'), filter=exclude_paths)
     tar.close()
 }
 do_fossology_create_tarball[cleandirs] = "${FOSSOLOGY_WORKDIR}"
@@ -294,7 +318,7 @@ python do_fossology_get_report() {
 }
 do_fossology_get_report[cleandirs] = "${FOSSOLOGY_REPORTDIR}"
 
-addtask do_fossology_create_tarball after do_patch
+addtask do_fossology_create_tarball after do_patch do_preconfigure
 addtask do_fossology_upload_analyze after do_fossology_create_tarball
 addtask do_fossology_get_report after do_fossology_upload_analyze
 addtask do_fossology_delete
