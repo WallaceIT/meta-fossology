@@ -92,16 +92,8 @@ def get_folder_id(server, name):
 
 python do_fossology_create_tarball() {
     import tarfile
+    import gzip
     import os
-
-    def exclude_paths(tarinfo):
-        if tarinfo.isdir() and tarinfo.name.endswith('.git'):
-            return None
-        elif tarinfo.isfile() and tarinfo.name in ['.gitignore', '.gitmodules']:
-            return None
-        elif tarinfo.issym() and tarinfo.name in ['oe-workdir', 'oe-logs']:
-            return None
-        return tarinfo
 
     fossology_workdir = d.getVar('FOSSOLOGY_WORKDIR')
     original_sysroot_native = d.getVar('STAGING_DIR_NATIVE')
@@ -137,10 +129,25 @@ python do_fossology_create_tarball() {
     if not (d.getVar('SRC_URI') == '' or is_work_shared(d)):
         bb.build.exec_func('do_patch', d)
 
+    # Metadata is reset for all source file, in order to produce exactly the
+    # same archive on different hosts at different times; this allows for upload
+    # reuse even with hash checking in place.
+    def exclude_paths_and_reset_metadata(tarinfo):
+        if tarinfo.isdir() and tarinfo.name.endswith('.git'):
+            return None
+        elif tarinfo.isfile() and tarinfo.name in ['.gitignore', '.gitmodules']:
+            return None
+        elif tarinfo.issym() and tarinfo.name in ['oe-workdir', 'oe-logs']:
+            return None
+        tarinfo.uid = tarinfo.gid = 1000
+        tarinfo.uname = tarinfo.gname = "fossy"
+        tarinfo.mtime = 1629378450
+        return tarinfo
+
     bb.note('Archiving the patched sources to be analyzed...')
-    tar = tarfile.open(filepath, 'w:gz')
-    tar.add(d.getVar('S'), arcname=d.getVar('PF'), filter=exclude_paths)
-    tar.close()
+    with gzip.GzipFile(filepath, 'wb', mtime=0) as gz:
+        with tarfile.open(fileobj=gz, mode='w:') as tar:
+            tar.add(d.getVar('S'), arcname=d.getVar('PF'), filter=exclude_paths_and_reset_metadata)
 }
 do_fossology_create_tarball[cleandirs] = "${FOSSOLOGY_WORKDIR}"
 
@@ -170,8 +177,31 @@ python do_fossology_upload_analyze() {
 
     upload_id = server.get_upload_id(filename, folder_id)
     if upload_id is not None:
-        bb.note('Sources already uploaded to fossology server (ID = %d)' % (upload_id))
-    else:
+        bb.note('File %s already present on server (ID = %d)' % (filename, upload_id))
+        # Check hash of local file against remote one
+        while True:
+            try:
+                data = server.upload_get_metadata(upload_id)
+            except FossologyRetryAfter as ra:
+                bb.note('Metadata not yet ready, will retry after %ds' % (ra.time))
+                time.sleep(ra.time)
+            except FossologyError as e:
+                bb.fatal('Cannot get upload metadata: %s' % (e.message))
+            else:
+                break
+        localhash = bb.utils.md5_file(filepath).lower()
+        remotehash = data['hash']['md5'].lower()
+        if localhash != remotehash:
+            bb.warn('Hash mismatch for file %s (local: %s, remote: %s), forcing re-upload' % (filename, localhash, remotehash))
+            if not server.upload_delete(upload_id):
+                bb.fatal("Failed to delete upload ID %d" % upload_id)
+            # Wait for upload to be deleted
+            while server.get_upload_id(filename, folder_id) is not None:
+                bb.debug(1, 'Waiting for %s (ID = %d) to be deleted' % (filename, upload_id))
+                time.sleep(5)
+            upload_id = None
+
+    if upload_id is None:
         wait_time = 5
         for i in range(10):
             bb.debug(1, 'Upload %s, trial %d' % (filename, i))

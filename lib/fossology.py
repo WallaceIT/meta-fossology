@@ -162,6 +162,17 @@ class FossologyServer:
         (code, headers, results) = self._api_delete('/uploads/%d' % (upload_id))
         return (code == 202)
 
+    def upload_get_metadata(self, upload_id: int) -> dict:
+        """Get metadata for upload having given ID"""
+        (code, headers, results) = self._api_get('/uploads/%d' % (upload_id))
+        if code == 503:
+            retry_after = int(headers.get("Retry-After", 3))
+            logger.info('Upload metadata not yet available')
+            raise FossologyRetryAfter(retry_after)
+        elif code != 200:
+            raise FossologyError(code, results.get("message", ""))
+        return results
+
     def upload_get_summary(self, upload_id: int) -> dict:
         """Get summary for given upload ID"""
         (code, headers, results) = self._api_get('/uploads/%d/summary' % (upload_id))
