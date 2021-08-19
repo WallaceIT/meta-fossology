@@ -68,7 +68,7 @@ class FossologyServer:
                 results = r.content
             else:
                 results = r.json()
-        except requests.exceptions.JSONDecodeError:
+        except:
             logger.error('Failed to decode JSON response')
             results = None
         logger.debug('GET %s -> %d' % (api, r.status_code))
@@ -81,7 +81,7 @@ class FossologyServer:
         r = requests.post('%s/api/v1%s' % (self.url, api), headers=all_headers, data=data, json=json)
         try:
             results = r.json()
-        except requests.exceptions.JSONDecodeError:
+        except:
             logger.error('Failed to decode JSON response')
             results = None
         logger.debug('POST %s -> %d' % (api, r.status_code))
@@ -94,7 +94,7 @@ class FossologyServer:
         r = requests.delete('%s/api/v1%s' % (self.url, api), headers=all_headers)
         try:
             results = r.json()
-        except requests.exceptions.JSONDecodeError:
+        except:
             logger.error('Failed to decode JSON response')
             results = None
         logger.debug('DELETE %s -> %d' % (api, r.status_code))
