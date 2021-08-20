@@ -13,7 +13,7 @@ FOSSOLOGY_DECIDER ?= "${AVAILABLE_DECIDER}"
 FOSSOLOGY_REPORT_FORMAT ??= "spdx2tv"
 FOSSOLOGY_FOLDER ??= "1"
 
-FOSSOLOGY_EXCLUDE_PACKAGES ?= "binutils-cross linux-libc-headers libtool-cross gcc-cross libgcc-initial glibc libgcc gcc gcc-runtime glibc-locale shadow-sysroot"
+FOSSOLOGY_EXCLUDE_PACKAGES ?= "linux-libc-headers binutils-cross libtool-cross gcc-cross libgcc-initial libgcc gcc gcc-runtime"
 
 FOSSOLOGY_EXCLUDE_NATIVE ??= "1"
 FOSSOLOGY_EXCLUDE_SDK ??= "1"
