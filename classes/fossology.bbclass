@@ -8,8 +8,8 @@
 
 FOSSOLOGY_SERVER ??= "http://127.0.0.1:8081/repo"
 FOSSOLOGY_TOKEN ??= ""
-FOSSOLOGY_ANALYSIS ?= "${AVAILABLE_ANALYSIS}"
-FOSSOLOGY_DECIDER ?= "${AVAILABLE_DECIDER}"
+FOSSOLOGY_ANALYSIS ?= "bucket copyright_email_author ecc keyword mime monk nomos ojo package reso"
+FOSSOLOGY_DECIDER ?= "nomos_monk bulk_reused new_scanner ojo_decider"
 FOSSOLOGY_REPORT_FORMAT ??= "spdx2tv"
 FOSSOLOGY_FOLDER ??= "1"
 
@@ -23,15 +23,11 @@ DEPLOY_DIR_FOSSOLOGY ?= "${DEPLOY_DIR}/fossology"
 FOSSOLOGY_WORKDIR = "${WORKDIR}/fossology-work/"
 FOSSOLOGY_REPORTDIR = "${WORKDIR}/fossology-report/"
 
-AVAILABLE_ANALYSIS = "bucket copyright_email_author ecc keyword mime monk nomos ojo package reso"
-AVAILABLE_DECIDER = "nomos_monk bulk_reused new_scanner ojo_decider"
-AVAILABLE_FORMATS = "dep5 spdx2 spdx2tv readmeoss unifiedreport"
-
 python () {
     pn = d.getVar('PN')
-    assume_provided = (d.getVar("ASSUME_PROVIDED") or "").split()
+    assume_provided = (d.getVar('ASSUME_PROVIDED') or '').split()
     if pn in assume_provided:
-        for p in d.getVar("PROVIDES").split():
+        for p in d.getVar('PROVIDES').split():
             if p != pn:
                 pn = p
                 break
@@ -43,21 +39,21 @@ python () {
         return
 
     # Analyze -cross and -initial recipes only if not excluded
-    if pn.endswith('-cross') and d.getVar("FOSSOLOGY_EXCLUDE_CROSS_INITIAL") == "1":
+    if pn.endswith('-cross') and d.getVar('FOSSOLOGY_EXCLUDE_CROSS_INITIAL') == '1':
         return
-    if pn.endswith('-initial') and d.getVar("FOSSOLOGY_EXCLUDE_CROSS_INITIAL") == "1":
+    if pn.endswith('-initial') and d.getVar('FOSSOLOGY_EXCLUDE_CROSS_INITIAL') == '1':
         return
 
     # Analyze native recipes only if not excluded
-    if pn.endswith('-native') and d.getVar("FOSSOLOGY_EXCLUDE_NATIVE") == "1":
+    if pn.endswith('-native') and d.getVar('FOSSOLOGY_EXCLUDE_NATIVE') == '1':
         return
 
     # Analyze SDK-related recipes only if not excluded
-    if pn.startswith('nativesdk-') and d.getVar("FOSSOLOGY_EXCLUDE_SDK") == "1":
+    if pn.startswith('nativesdk-') and d.getVar('FOSSOLOGY_EXCLUDE_SDK') == '1':
         return
-    if pn.endswith('-crosssdk') and d.getVar("FOSSOLOGY_EXCLUDE_SDK") == "1":
+    if pn.endswith('-crosssdk') and d.getVar('FOSSOLOGY_EXCLUDE_SDK') == '1':
         return
-    if pn.endswith('-cross-canadian') and d.getVar("FOSSOLOGY_EXCLUDE_SDK") == "1":
+    if pn.endswith('-cross-canadian') and d.getVar('FOSSOLOGY_EXCLUDE_SDK') == '1':
         return
 
     # Just scan gcc-source for all the gcc related recipes
@@ -71,26 +67,29 @@ python () {
         return
 
     # Exclude packages contained in FOSSOLOGY_EXCLUDE_PACKAGES
-    if pn in d.getVar("FOSSOLOGY_EXCLUDE_PACKAGES").split():
+    if pn in d.getVar('FOSSOLOGY_EXCLUDE_PACKAGES').split():
         bb.debug(1, 'fossology: %s excluded from analysis' % (pn))
         return
 
     # Check configuration variables
-    analysis_available = d.getVar('AVAILABLE_ANALYSIS').split()
-    analysis_enabled = d.getVar('FOSSOLOGY_ANALYSIS').split()
-    for invalid in filter(lambda x: x not in analysis_available, analysis_enabled):
-        bb.fatal("Invalid element %s found in FOSSOLOGY_ANALYSIS" % invalid)
+    from fossology import FossologyServer
 
-    decider_available = d.getVar('AVAILABLE_DECIDER').split()
-    decider_enabled = d.getVar('FOSSOLOGY_DECIDER').split()
-    for invalid in filter(lambda x: x not in decider_available, decider_enabled):
-        bb.fatal("Invalid element %s found in FOSSOLOGY_DECIDER" % invalid)
+    invalid_agents = ', '.join([x for x in d.getVar('FOSSOLOGY_ANALYSIS').split() if x not in FossologyServer.AVAILABLE_ANALYSIS])
+    if len(invalid_agents) != 0:
+        bb.warn('Available analysis agents: %s' % (FossologyServer.AVAILABLE_ANALYSIS))
+        bb.fatal('Invalid agents found in FOSSOLOGY_ANALYSIS: %s' % (invalid_agents))
 
-    formats_available = d.getVar('AVAILABLE_FORMATS').split()
-    format_selected = d.getVar('FOSSOLOGY_REPORT_FORMAT')
-    if format_selected not in formats_available:
-        bb.fatal("Invalid report format %s selected" % (format_selected))
+    invalid_agents = ', '.join([x for x in d.getVar('FOSSOLOGY_DECIDER').split() if x not in FossologyServer.AVAILABLE_DECIDER])
+    if len(invalid_agents) != 0:
+        bb.warn('Available decider agents: %s' % (FossologyServer.AVAILABLE_DECIDER))
+        bb.fatal('Invalid agents found in FOSSOLOGY_DECIDER: %s' % (invalid_agents))
 
+    report_format = d.getVar('FOSSOLOGY_REPORT_FORMAT')
+    if report_format not in FossologyServer.AVAILABLE_FORMATS:
+        bb.warn('Available report formats: %s' % (FossologyServer.AVAILABLE_FORMATS))
+        bb.fatal('Invalid format specified in FOSSOLOGY_REPORT_FORMAT: %s' % (report_format))
+
+    # Make fossology_deploy_report, defined for all classes, depend on fossology_get_report
     d.appendVarFlag('do_fossology_deploy_report', 'depends', ' %s:do_fossology_get_report' % pn)
 }
 
@@ -156,7 +155,7 @@ python do_fossology_create_tarball() {
         elif tarinfo.issym() and tarinfo.name in ['oe-workdir', 'oe-logs']:
             return None
         tarinfo.uid = tarinfo.gid = 1000
-        tarinfo.uname = tarinfo.gname = "fossy"
+        tarinfo.uname = tarinfo.gname = 'fossy'
         tarinfo.mtime = 1629378450
         return tarinfo
 
@@ -213,7 +212,7 @@ python do_fossology_upload_analyze() {
         if localhash != remotehash:
             bb.warn('Hash mismatch for file %s (local: %s, remote: %s), forcing re-upload' % (filename, localhash, remotehash))
             if not server.upload_delete(upload_id):
-                bb.fatal("Failed to delete upload ID %d" % upload_id)
+                bb.fatal('Failed to delete upload ID %d' % upload_id)
             # Wait for upload to be deleted
             while server.get_upload_id(filename, folder_id) is not None:
                 bb.debug(1, 'Waiting for %s (ID = %d) to be deleted' % (filename, upload_id))
@@ -285,7 +284,7 @@ python do_fossology_upload_analyze() {
     bb.debug(1, 'Wait for licenses to be ready')
     while True:
         try:
-            agents = [x for x in ["nomos", "monk", "ojo", "reso"] if x in fossology_analysis]
+            agents = [x for x in ['nomos', 'monk', 'ojo', 'reso'] if x in fossology_analysis]
             server.upload_get_licenses(upload_id, agents)
         except FossologyRetryAfter as ra:
             bb.note('Licenses not yet ready, will retry after %ds' % (ra.time))
@@ -321,9 +320,9 @@ python do_fossology_delete() {
 
     while upload_id is not None:
         if not server.upload_delete(upload_id):
-            bb.error("Failed to delete upload ID %d" % upload_id)
+            bb.error('Failed to delete upload ID %d' % upload_id)
         else:
-            bb.note("Deleted upload ID %d" % upload_id)
+            bb.note('Deleted upload ID %d' % upload_id)
         upload_id = server.get_upload_id(filename, folder_id)
 }
 
@@ -371,7 +370,7 @@ python do_fossology_get_report() {
             reportpath = os.path.join(fossology_reportdir, reportname)
             with open(reportpath, 'wb') as reportfile:
                 reportfile.write(reportdata)
-            bb.note("%s report saved to %s" % (report_format, reportpath))
+            bb.note('%s report saved to %s' % (report_format, reportpath))
             break
 }
 do_fossology_get_report[cleandirs] = "${FOSSOLOGY_REPORTDIR}"
