@@ -1,6 +1,7 @@
 # meta-fossology
 
-Yocto meta-layer for automatic scan of used sources using Fossology.
+Yocto meta-layer for automatic scan of built sources using
+[Fossology](https://www.fossology.org/).
 
 ## Build host requirements
 
@@ -10,7 +11,8 @@ Yocto meta-layer for automatic scan of used sources using Fossology.
 
 ## How-To
 
-To enable Fossology scan on built sources, add following lines to _local.conf_:
+To enable Fossology scan on built sources, following lines shall be added to
+_local.conf_ file of current Yocto build:
 
 ```
 FOSSOLOGY_SERVER = "http://127.0.0.1:8081/repo"
@@ -18,7 +20,7 @@ FOSSOLOGY_TOKEN = "<MY-TOKEN>"
 ```
 
 _FOSSOLOGY_TOKEN_ shall be set to the value of a read/write token generated
-through Fossolgy web UI.
+through Fossology web UI.
 
 ### Exclude packages from scan
 
@@ -52,46 +54,48 @@ FOSSOLOGY_FOLDER = "My upload folder"
 
 By default the root folder, having ID=1, is used.
 
-### Customize analysis agents
+### Customize analysis and decider agents
 
-Analysis agents can be customized using the _FOSSOLOGY_ANALYSIS_ variable.
-
-Following agents are available:
-
-* bucket
-* copyright_email_author
-* ecc
-* keyword
-* mime
-* monk
-* nomos
-* ojo
-* package
-* reso
+Analysis and decider agents can be customized using respectively the
+_FOSSOLOGY_ANALYSIS_ and _FOSSOLOGY_DECIDER_ variables.
 
 e.g.
 ```
 FOSSOLOGY_ANALYSIS = "bucket copyright_email_author ecc keyword mime monk nomos"
+FOSSOLOGY_DECIDER = "nomos_monk bulk_reused new_scanner"
 ```
+
+For available agents see the [fossology class](lib/fossology.py).
 
 ### Customize output report format
 
 Report format can be customized using the _FOSSOLOGY_REPORT_FORMAT_ variable.
-
-Following formats are available:
-
-* dep5
-* spdx2
-* spdx2tv
-* readmeoss
-* unifiedreport
 
 e.g.
 ```
 FOSSOLOGY_REPORT_FORMAT = "spdx2tv"
 ```
 
+For available formats see the [fossology class](lib/fossology.py).
+
 ### Report output directory
 
 Once generated, reports will be downloaded to _DEPLOY_DIR_FOSSOLOGY_, which
 defaults to _tmp/deploy/fossology_.
+
+### Delete upload from server
+
+In order to delete a specific upload from the Fossology server, the
+_fossology_delete_ task can be invoked.
+
+e.g.
+```
+bitbake -c fossology_delete opkg-utils
+```
+
+## License
+
+Meta-fossology layer is released under the [MIT license](LICENSE.MIT).
+
+Fossology is a Linux Foundation Project with its own licenses; for details, see
+the [Fossology official website](https://www.fossology.org/).
