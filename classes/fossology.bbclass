@@ -121,7 +121,8 @@ python do_fossology_create_tarball() {
     bb.note('Extracting and patching sources...')
 
     def is_work_shared(d):
-        return bb.data.inherits_class('kernel', d)
+        pn = d.getVar('PN')
+        return bb.data.inherits_class('kernel', d) or pn.startswith('gcc-source')
 
     if not is_work_shared(d):
         # Change the WORKDIR to make do_unpack do_patch run in another dir.
