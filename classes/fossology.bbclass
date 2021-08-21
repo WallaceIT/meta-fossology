@@ -13,7 +13,7 @@ FOSSOLOGY_DECIDER ?= "${AVAILABLE_DECIDER}"
 FOSSOLOGY_REPORT_FORMAT ??= "spdx2tv"
 FOSSOLOGY_FOLDER ??= "1"
 
-FOSSOLOGY_EXCLUDE_PACKAGES ?= "linux-libc-headers libgcc gcc gcc-runtime"
+FOSSOLOGY_EXCLUDE_PACKAGES ?= "linux-libc-headers"
 
 FOSSOLOGY_EXCLUDE_CROSS_INITIAL ??= "1"
 FOSSOLOGY_EXCLUDE_NATIVE ??= "1"
@@ -58,6 +58,16 @@ python () {
     if pn.endswith('-crosssdk') and d.getVar("FOSSOLOGY_EXCLUDE_SDK") == "1":
         return
     if pn.endswith('-cross-canadian') and d.getVar("FOSSOLOGY_EXCLUDE_SDK") == "1":
+        return
+
+    # Just scan gcc-source for all the gcc related recipes
+    if pn in ['gcc', 'libgcc', 'gcc-runtime']:
+        bb.debug(1, 'fossology: excluding %s, covered by gcc-source' % (pn))
+        return
+
+    # Just scan glibc for all the glibc related recipes
+    if pn.startswith('glibc-'):
+        bb.debug(1, 'fossology: excluding %s, covered by glibc' % (pn))
         return
 
     # Exclude packages contained in FOSSOLOGY_EXCLUDE_PACKAGES
