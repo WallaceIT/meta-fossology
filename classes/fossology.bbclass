@@ -148,11 +148,11 @@ python do_fossology_create_tarball() {
     # same archive on different hosts at different times; this allows for upload
     # reuse even with hash checking in place.
     def exclude_paths_and_reset_metadata(tarinfo):
-        if tarinfo.isdir() and tarinfo.name.endswith('.git'):
+        if tarinfo.isdir() and tarinfo.name in ['CVS', '.bzr', '.git', '.hg', '.osc', '.p4', '.repo', '.svn']:
             return None
         elif tarinfo.isfile() and tarinfo.name in ['.gitignore', '.gitmodules']:
             return None
-        elif tarinfo.issym() and tarinfo.name in ['oe-workdir', 'oe-logs']:
+        elif (tarinfo.isdir() or tarinfo.issym()) and tarinfo.name in ['oe-local-files', 'oe-logs', 'oe-workdir']:
             return None
         tarinfo.uid = tarinfo.gid = 1000
         tarinfo.uname = tarinfo.gname = 'fossy'
