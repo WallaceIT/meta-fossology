@@ -13,8 +13,9 @@ FOSSOLOGY_DECIDER ?= "${AVAILABLE_DECIDER}"
 FOSSOLOGY_REPORT_FORMAT ??= "spdx2tv"
 FOSSOLOGY_FOLDER ??= "1"
 
-FOSSOLOGY_EXCLUDE_PACKAGES ?= "linux-libc-headers binutils-cross libtool-cross gcc-cross libgcc-initial libgcc gcc gcc-runtime"
+FOSSOLOGY_EXCLUDE_PACKAGES ?= "linux-libc-headers libgcc gcc gcc-runtime"
 
+FOSSOLOGY_EXCLUDE_CROSS_INITIAL ??= "1"
 FOSSOLOGY_EXCLUDE_NATIVE ??= "1"
 FOSSOLOGY_EXCLUDE_SDK ??= "1"
 
@@ -39,6 +40,12 @@ python () {
     if bb.data.inherits_class('nopackages', d) or \
        bb.data.inherits_class('packagegroup', d) or \
        bb.data.inherits_class('image', d):
+        return
+
+    # Analyze -cross and -initial recipes only if not excluded
+    if pn.endswith('-cross') and d.getVar("FOSSOLOGY_EXCLUDE_CROSS_INITIAL") == "1":
+        return
+    if pn.endswith('-initial') and d.getVar("FOSSOLOGY_EXCLUDE_CROSS_INITIAL") == "1":
         return
 
     # Analyze native recipes only if not excluded
