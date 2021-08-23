@@ -39,22 +39,25 @@ python () {
         return
 
     # Analyze -cross and -initial recipes only if not excluded
-    if pn.endswith('-cross') and d.getVar('FOSSOLOGY_EXCLUDE_CROSS_INITIAL') == '1':
-        return
-    if pn.endswith('-initial') and d.getVar('FOSSOLOGY_EXCLUDE_CROSS_INITIAL') == '1':
-        return
+    if d.getVar('FOSSOLOGY_EXCLUDE_CROSS_INITIAL') == '1':
+        for t in ['-initial', '-cross-${TARGET_ARCH}',
+                  '-cross-initial-${TARGET_ARCH}']:
+            if pn.endswith(d.expand(t)):
+                return
 
     # Analyze native recipes only if not excluded
-    if pn.endswith('-native') and d.getVar('FOSSOLOGY_EXCLUDE_NATIVE') == '1':
-        return
+    if d.getVar('FOSSOLOGY_EXCLUDE_NATIVE') == '1':
+        if pn.endswith('-native'):
+            return
 
     # Analyze SDK-related recipes only if not excluded
-    if pn.startswith('nativesdk-') and d.getVar('FOSSOLOGY_EXCLUDE_SDK') == '1':
-        return
-    if pn.endswith('-crosssdk') and d.getVar('FOSSOLOGY_EXCLUDE_SDK') == '1':
-        return
-    if pn.endswith('-cross-canadian') and d.getVar('FOSSOLOGY_EXCLUDE_SDK') == '1':
-        return
+    if d.getVar('FOSSOLOGY_EXCLUDE_SDK') == '1':
+        if pn.startswith('nativesdk-'):
+            return
+        for t in ['-crosssdk-${SDK_SYS}', '-crosssdk-initial-${SDK_SYS}',
+                  '-cross-canadian-${TRANSLATED_TARGET_ARCH}']:
+            if pn.endswith(d.expand(t)):
+                return
 
     # Just scan gcc-source for all the gcc related recipes
     if pn in ['gcc', 'libgcc', 'gcc-runtime']:
