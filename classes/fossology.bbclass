@@ -283,7 +283,7 @@ python do_fossology_upload_analyze() {
         else:
             bb.debug(1, 'Job not yet completed, will retry after %ds' % (wait_time))
             time.sleep(wait_time)
-            wait_time = max(wait_time * 2, 60)
+            wait_time = min(wait_time * 2, 60)
 
     # Wait for licenses summary to be ready
     bb.debug(1, 'Wait for licenses to be ready')
